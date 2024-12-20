@@ -82,7 +82,11 @@ param(
   [bool] $BaseImageCleanup = $true, # delete old vhd image. Set to false if using (TODO) differencing VHD
   [switch] $ShowSerialConsoleWindow = $false,
   [switch] $ShowVmConnectWindow = $false,
-  [switch] $Force = $false
+  [switch] $Force = $false,
+  [switch] $InstallPowershell = $false,
+  [switch] $PrintUserDataOnly = $false,
+  [switch] $AddKeyToRoot = $false,
+  [string] $RootPassword = $null
 )
 
 [System.Threading.Thread]::CurrentThread.CurrentUICulture = "en-US"
@@ -609,7 +613,6 @@ users:
     groups: [sudo]
     shell: /bin/bash
     sudo: ALL=(ALL) NOPASSWD:ALL
-    lock_passwd: false
     plain_text_passwd: $($GuestAdminPassword)
     lock_passwd: false
 $(if (-not [string]::IsNullOrEmpty($GuestAdminSshPubKey)) {
@@ -621,7 +624,16 @@ $(if (-not [string]::IsNullOrEmpty($GuestAdminSshPubKeyFile)) {
     - $(Get-Content -Path $GuestAdminSshPubKeyFile -Raw)
 "})
 
-disable_root: true    # true: notify default user account / false: allow root ssh login
+$(if($null -ne $RootPassword){
+"
+chpasswd:
+    list: |
+          root:$RootPassword
+    expire: False
+"
+})
+
+disable_root: false    # true: notify default user account / false: allow root ssh login
 ssh_pwauth: true      # true: allow login with password; else only with setup pubkey(s)
 
 #ssh_authorized_keys:
@@ -632,6 +644,16 @@ ssh_pwauth: true      # true: allow login with password; else only with setup pu
 $(if ($NetAutoconfig -eq $true) { "#" })bootcmd:
 $(if ($NetAutoconfig -eq $true) { "#" })  - [ cloud-init-per, once, fix-dhcp, sh, -c, "if test -f /etc/dhcp/dhclient.conf; then sed -e 's/#timeout 60;/timeout 1;/g' -i /etc/dhcp/dhclient.conf; fi" ]
 runcmd:
+$(if($InstallPowershell -eq $true){
+  "
+  - apt-get -y update
+  - add-apt-repository universe
+  # PowerShell
+  - wget https://raw.githubusercontent.com/PowerShell/PowerShell/master/tools/install-powershell.sh
+  - chmod 755 install-powershell.sh
+  - ./install-powershell.sh
+  "
+})
 $(if (($NetAutoconfig -eq $false) -and ($NetConfigType -ieq "ENI-file")) {
 "  # maybe condition OS based for Debian only and not ENI-file based?
   # Comment out cloud-init based dhcp configuration for $NetInterface
@@ -658,6 +680,13 @@ $(if ($ImageTypeAzure) { "
   - [ sh, -c, sed -i 's/XKBLAYOUT=\"\w*"/XKBLAYOUT=\"'$($KeyboardLayout)'\"/g' /etc/default/keyboard ]
 
 write_files:
+    $(if(($AddKeyToRoot -eq $true) -and (-not [string]::IsNullOrEmpty($GuestAdminSshPubKeyFile))){
+"
+  - content: |
+      $(Get-Content -Path $GuestAdminSshPubKeyFile -Raw)
+    path: /root/.ssh/authorized_keys
+"
+        })
   # hyperv-daemons package in mosts distros is missing this file and spamming syslog:
   # https://github.com/torvalds/linux/blob/master/tools/hv/hv_get_dns_info.sh
   - content: |
@@ -733,6 +762,11 @@ power_state:
 Write-Verbose "Userdata:"
 Write-Verbose $userdata
 Write-Verbose ""
+
+if($PrintUserDataOnly){
+    Write-Host $userdata -ForegroundColor Green
+    Exit
+}
 
 # override default userdata with custom yaml file: $CustomUserDataYamlFile
 # the will be parsed for any powershell variables, src: https://deadroot.info/scripts/2018/09/04/PowerShell-Templating
