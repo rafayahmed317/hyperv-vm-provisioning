@@ -617,11 +617,11 @@ users:
     lock_passwd: false
 $(if (-not [string]::IsNullOrEmpty($GuestAdminSshPubKey)) {
 "    ssh_authorized_keys:
-    - $GuestAdminSshPubKey
+    - `'$GuestAdminSshPubKey`'
 "})
 $(if (-not [string]::IsNullOrEmpty($GuestAdminSshPubKeyFile)) {
 "    ssh_authorized_keys:
-    - $(Get-Content -Path $GuestAdminSshPubKeyFile -Raw)
+    - `'$((Get-Content -Path $GuestAdminSshPubKeyFile -Raw).Trim())`'
 "})
 
 $(if($null -ne $RootPassword){
